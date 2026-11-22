@@ -1,0 +1,28 @@
+{
+  "name": "traffic-time",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mô phỏng giao thông Việt Nam 3D (xe máy + ô tô) để luyện lái — three.js + React + TypeScript",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8"
+  }
+}
