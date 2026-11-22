@@ -36,12 +36,12 @@ export interface VehicleSpec {
 }
 
 export const SPECS: Record<'wave110' | 'vision110' | 'sedan', VehicleSpec> = {
-  // Xe số 110 cc kiểu Honda Wave — 4 số, ly hợp tự động (sang số tự động trong game)
-  wave110: { kind: 'motorbike', mass: 97 + 65, wheelBase: 1.23, maxSteer: 0.6, steerAtSpeed: 0.08, enginePower: 6000, maxForce: 900, brakeForce: 1500, drag: 0.32, rolling: 18, gearRatios: [3.3, 2.0, 1.45, 1.15], idleRpm: 1400, redlineRpm: 9000, wheelRadius: 0.29, topSpeed: 27 },
-  // Xe tay ga kiểu Honda Vision — CVT, rpm tăng mượt
-  vision110: { kind: 'motorbike', mass: 99 + 65, wheelBase: 1.26, maxSteer: 0.6, steerAtSpeed: 0.08, enginePower: 6300, maxForce: 850, brakeForce: 1550, drag: 0.33, rolling: 18, gearRatios: [], idleRpm: 1600, redlineRpm: 8500, wheelRadius: 0.27, topSpeed: 26 },
-  // Sedan hạng B (Vios/Accent) — số tự động 4 cấp, tay lái bên trái
-  sedan: { kind: 'car', mass: 1150, wheelBase: 2.55, maxSteer: 0.6, steerAtSpeed: 0.22, enginePower: 78000, maxForce: 5200, brakeForce: 11000, drag: 0.42, rolling: 140, gearRatios: [3.6, 2.1, 1.4, 1.0], idleRpm: 750, redlineRpm: 6200, wheelRadius: 0.31, topSpeed: 50 },
+  // Xe số 110 cc kiểu Honda Wave — 4 số, ly hợp tự động, lái đầm & dễ giữ thẳng làn
+  wave110: { kind: 'motorbike', mass: 97 + 65, wheelBase: 1.28, maxSteer: 0.44, steerAtSpeed: 0.11, enginePower: 5800, maxForce: 820, brakeForce: 1700, drag: 0.34, rolling: 19, gearRatios: [3.3, 2.0, 1.45, 1.15], idleRpm: 1400, redlineRpm: 9000, wheelRadius: 0.29, topSpeed: 26 },
+  // Xe tay ga kiểu Honda Vision — CVT êm ái, ổn định trong phố đông
+  vision110: { kind: 'motorbike', mass: 99 + 65, wheelBase: 1.28, maxSteer: 0.43, steerAtSpeed: 0.11, enginePower: 6000, maxForce: 780, brakeForce: 1750, drag: 0.35, rolling: 19, gearRatios: [], idleRpm: 1600, redlineRpm: 8500, wheelRadius: 0.27, topSpeed: 25 },
+  // Sedan hạng B (Vios/Accent) — số tự động 4 cấp, tay lái bên trái, vô-lăng đầm chắc
+  sedan: { kind: 'car', mass: 1150, wheelBase: 2.58, maxSteer: 0.48, steerAtSpeed: 0.16, enginePower: 76000, maxForce: 4900, brakeForce: 12000, drag: 0.43, rolling: 145, gearRatios: [3.6, 2.1, 1.4, 1.0], idleRpm: 750, redlineRpm: 6200, wheelRadius: 0.31, topSpeed: 48 },
 };
 
 export function createState(x = 0, z = 0, heading = 0): VehicleState {
@@ -50,22 +50,31 @@ export function createState(x = 0, z = 0, heading = 0): VehicleState {
 
 const G = 9.81;
 
+/** Góc nghiêng tối đa của xe máy phổ thông (~12.6°) — tự nhiên, không bao giờ nghiêng quá đà. */
+export const MAX_BIKE_LEAN_RAD = 0.22;
+
 export function stepVehicle(s: VehicleState, spec: VehicleSpec, input: DriveInput, dt: number, speedLimitMs = Infinity) {
   const v = s.speed;
   const absV = Math.abs(v);
 
-  // --- Lái: góc tối đa giảm dần theo tốc độ (giống người thật đánh lái nhẹ khi chạy nhanh)
-  const t = Math.min(absV / 16.7, 1);
-  const maxSteer = spec.maxSteer * (1 - t) + spec.steerAtSpeed * t;
-  s.steerAngle += (input.steer * maxSteer - s.steerAngle) * Math.min(1, dt * (spec.kind === 'car' ? 6 : 8));
+  // --- Lái: giảm mượt theo tốc độ + hồi thẳng nhanh khi nhả phím A/D
+  const speedFrac = Math.min(absV / 15.5, 1);
+  const easeSpeed = Math.pow(speedFrac, 0.72);
+  const maxSteer = spec.maxSteer * (1 - easeSpeed) + spec.steerAtSpeed * easeSpeed;
+  const targetSteer = input.steer * maxSteer;
+  const returningToCenter =
+    Math.abs(targetSteer) < Math.abs(s.steerAngle) || targetSteer * s.steerAngle < 0;
+  const steerRate = returningToCenter ? 11.5 : spec.kind === 'car' ? 5.2 : 6.0;
+  s.steerAngle += (targetSteer - s.steerAngle) * Math.min(1, dt * steerRate);
 
-  // --- Lực dọc
+  // --- Lực dọc (khởi hành mượt hơn ở tốc độ thấp để dễ căn trong phố)
   let force = 0;
   const wantsReverse = input.reverse && absV < 0.5 && input.throttle < 0.1;
-  if (input.reverse && v > 0.5) force -= spec.brakeForce * 0.5; // S khi đang chạy = phanh nhẹ
+  if (input.reverse && v > 0.5) force -= spec.brakeForce * 0.52; // S khi đang chạy = phanh nhẹ
   if (input.throttle > 0 && v >= -0.2) {
-    const pLimited = spec.enginePower / Math.max(absV, 2.5);
-    force += input.throttle * Math.min(spec.maxForce, pLimited);
+    const launchEase = absV < 3.5 ? 0.82 + 0.18 * (absV / 3.5) : 1.0;
+    const pLimited = spec.enginePower / Math.max(absV, 2.6);
+    force += input.throttle * launchEase * Math.min(spec.maxForce, pLimited);
   }
   if (wantsReverse || (input.reverse && v <= 0)) force -= spec.maxForce * 0.35 * (spec.kind === 'car' ? 1 : 0.25); // xe máy: dắt lùi chậm
   const braking = input.brake > 0.05;
@@ -76,20 +85,31 @@ export function stepVehicle(s: VehicleState, spec: VehicleSpec, input: DriveInpu
   if (braking && Math.abs(v) < Math.abs(acc * dt)) { acc = 0; s.speed = 0; }
   s.speed += acc * dt;
   s.speed = Math.max(-4, Math.min(s.speed, Math.min(spec.topSpeed, speedLimitMs)));
-  if (!braking && input.throttle === 0 && !input.reverse && Math.abs(s.speed) < 0.05) s.speed = 0;
+  if (!braking && input.throttle === 0 && !input.reverse && Math.abs(s.speed) < 0.06) s.speed = 0;
   s.braking = braking;
 
-  // --- Quay đầu: mô hình xe đạp
-  s.yawRate = (s.speed / spec.wheelBase) * Math.tan(s.steerAngle);
+  // --- Quay đầu: mô hình xe đạp có giới hạn tốc độ xoay để cua êm & dễ kiểm soát
+  const rawYaw = (s.speed / spec.wheelBase) * Math.tan(s.steerAngle);
+  const maxYaw = spec.kind === 'car' ? 1.45 : 1.75;
+  s.yawRate = Math.max(-maxYaw, Math.min(maxYaw, rawYaw));
   s.heading -= s.yawRate * dt; // steer dương = rẽ phải = heading giảm (theo quy ước right = (-cos,0,sin))
   s.x += Math.sin(s.heading) * s.speed * dt;
   s.z += Math.cos(s.heading) * s.speed * dt;
 
-  // --- Nghiêng (xe máy) = atan(v·ω / g), làm mượt; ô tô thì nghiêng thân nhẹ ngược chiều (body roll)
-  const targetLean = Math.atan((s.speed * s.yawRate) / G);
-  if (spec.kind === 'motorbike') s.lean += (Math.max(-0.75, Math.min(0.75, targetLean)) - s.lean) * Math.min(1, dt * 5);
-  else s.lean += (-targetLean * 0.08 - s.lean) * Math.min(1, dt * 4);
-  s.pitch += ((braking ? 0.025 * input.brake : 0) - (input.throttle * 0.01) - s.pitch) * Math.min(1, dt * 6);
+  // --- Nghiêng (xe máy): nghiêng nhẹ tự nhiên (tối đa ~12.6°), đứng thẳng khi đi chậm, tự hồi thẳng rất nhanh
+  const speedFade = Math.max(0, Math.min(1, (absV - 1.0) / 3.6));
+  if (spec.kind === 'motorbike') {
+    const rawLean = Math.atan((s.speed * s.yawRate) / (G * 2.65)) * speedFade;
+    const clampedLean = Math.max(-MAX_BIKE_LEAN_RAD, Math.min(MAX_BIKE_LEAN_RAD, rawLean));
+    const uprighting = Math.abs(clampedLean) < Math.abs(s.lean);
+    const leanRate = uprighting ? 11.0 : 5.5;
+    s.lean += (clampedLean - s.lean) * Math.min(1, dt * leanRate);
+  } else {
+    const rawRoll = -Math.atan((s.speed * s.yawRate) / (G * 2.6)) * 0.05 * speedFade;
+    const clampedRoll = Math.max(-0.032, Math.min(0.032, rawRoll));
+    s.lean += (clampedRoll - s.lean) * Math.min(1, dt * 7.5);
+  }
+  s.pitch += ((braking ? 0.02 * input.brake : 0) - (input.throttle * 0.008) - s.pitch) * Math.min(1, dt * 6);
 
   // --- Vòng tua & số
   s.wheelSpin += (s.speed / spec.wheelRadius) * dt;

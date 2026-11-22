@@ -70,15 +70,16 @@ export class Controls {
 
   isDown(a: Action) { return KEYMAP[a].some(k => this.down.has(k)); }
 
-  /** Gọi mỗi frame. Làm mượt ga/phanh/lái như tay người thật. */
+  /** Gọi mỗi frame. Làm mượt ga/phanh/lái như tay người thật — trả lái nhanh và ổn định. */
   update(dt: number) {
     const i = this.input;
     const approach = (v: number, t: number, rate: number) => v + Math.sign(t - v) * Math.min(Math.abs(t - v), rate * dt);
-    i.throttle = approach(i.throttle, this.isDown('throttle') ? 1 : 0, this.isDown('throttle') ? 2.5 : 5);
-    i.brake = approach(i.brake, this.isDown('brake') ? 1 : 0, 6);
+    i.throttle = approach(i.throttle, this.isDown('throttle') ? 1 : 0, this.isDown('throttle') ? 5.2 : 7.5);
+    i.brake = approach(i.brake, this.isDown('brake') ? 1 : 0, 8.5);
     const steerTarget = (this.isDown('right') ? 1 : 0) - (this.isDown('left') ? 1 : 0);
-    // trả lái về giữa nhanh hơn đánh lái (giống tay lái tự hồi)
-    i.steer = approach(i.steer, steerTarget, steerTarget === 0 ? 4 : 2.2);
+    // Trả lái về giữa nhanh hơn nhiều so với đánh lái để xe máy & ô tô dễ giữ thẳng làn
+    const steerRate = steerTarget === 0 ? 8.5 : (steerTarget * i.steer < 0 ? 7.5 : 3.4);
+    i.steer = approach(i.steer, steerTarget, steerRate);
     i.reverse = this.isDown('reverse');
     i.horn = this.isDown('horn');
   }

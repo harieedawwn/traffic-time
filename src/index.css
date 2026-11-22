@@ -1,0 +1,199 @@
+/*
+ * Traffic Time — Saigon Modernist Transit UI System
+ * 100% FLAT SOLID COLORS: NO gradients, NO neon, NO bloom/glow, NO backdrop-blur.
+ * Warm Saigon Ivory (#f4efe4) + Deep Carbon Ink (#141820) + Vermilion (#d92d20) + QCVN Cobalt (#0c4da2) + Marigold (#eab308) + Jade (#15803d).
+ */
+:root {
+  --tt-ink: #141820;
+  --tt-ink-soft: #1f2633;
+  --tt-ink-muted: #525d6e;
+  --tt-paper: #f4efe4;
+  --tt-paper-alt: #e8e0cf;
+  --tt-paper-deep: #dcd3be;
+  --tt-white: #ffffff;
+  --tt-vermilion: #d92d20;
+  --tt-vermilion-dark: #9f1b13;
+  --tt-gold: #eab308;
+  --tt-gold-deep: #a16207;
+  --tt-jade: #15803d;
+  --tt-jade-bright: #22c55e;
+  --tt-cobalt: #0c4da2;
+  --tt-cobalt-dark: #083470;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+  background-color: #141820;
+  color: #141820;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+}
+
+/* Architectural chamfered Saigon transit surfaces (zero blur, zero gradient) */
+.saigon-panel {
+  background-color: var(--tt-paper);
+  color: var(--tt-ink);
+  border: 2px solid var(--tt-ink);
+  box-shadow: 6px 6px 0 #141820;
+}
+
+.saigon-panel-dark {
+  background-color: var(--tt-ink);
+  color: var(--tt-paper);
+  border: 2px solid var(--tt-paper);
+  box-shadow: 5px 5px 0 #090c11;
+}
+
+/* Crisp chamfered corner wrapper (outer filter drop-shadow has 0 blur = razor-sharp solid ink offset!) */
+.chamfer-shell {
+  filter: drop-shadow(5px 5px 0 #141820);
+}
+
+.chamfer-box {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+.chamfer-box-sm {
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+
+/* Authentic Vietnamese QCVN Cobalt Street Sign Plate */
+.vn-street-sign {
+  background-color: var(--tt-cobalt);
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  outline: 2px solid var(--tt-ink);
+  box-shadow: 4px 4px 0 #141820;
+}
+
+/* Authentic Vietnamese Metal License Plate Card */
+.vn-plate {
+  background-color: #ffffff;
+  color: var(--tt-ink);
+  border: 2px solid var(--tt-ink);
+  position: relative;
+}
+
+.vn-plate-active {
+  background-color: var(--tt-ink);
+  color: var(--tt-paper);
+  border: 2px solid var(--tt-ink);
+  box-shadow: 3px 3px 0 var(--tt-vermilion);
+}
+
+/* Authentic Circular Vietnamese QCVN P.127 Speed Limit Sign */
+.qcvn-speed-sign {
+  border-radius: 50%;
+  background-color: #ffffff;
+  border-style: solid;
+  border-color: var(--tt-vermilion);
+  color: var(--tt-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Tactile physical keycap chip */
+.kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  background-color: var(--tt-paper);
+  color: var(--tt-ink);
+  border: 1.5px solid var(--tt-ink);
+  border-bottom: 3px solid var(--tt-ink);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kbd-chip-dark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  background-color: var(--tt-ink-soft);
+  color: var(--tt-gold);
+  border: 1px solid #3c4657;
+  border-bottom: 2px solid #090b0f;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Crisp custom scrollbars */
+.flat-scroll::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.flat-scroll::-webkit-scrollbar-track {
+  background-color: var(--tt-paper-alt);
+}
+
+.flat-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--tt-ink);
+}
+
+.flat-scroll-dark::-webkit-scrollbar {
+  width: 6px;
+}
+
+.flat-scroll-dark::-webkit-scrollbar-track {
+  background-color: #141820;
+}
+
+.flat-scroll-dark::-webkit-scrollbar-thumb {
+  background-color: #495569;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 0;
+  border: none;
+  transition: transform 0.08s ease, background-color 0.1s ease, color 0.1s ease;
+}
+
+button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--tt-vermilion);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}

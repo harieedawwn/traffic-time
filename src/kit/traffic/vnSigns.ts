@@ -158,11 +158,11 @@ export function makeSignMesh(code: SignCode, o: SignOptions & { height?: number;
   const isPlate = code === 'S.RIGHT_ON_RED';
   const geo = isPlate ? new THREE.PlaneGeometry(size, size / 2) : new THREE.PlaneGeometry(size, size);
   const face = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: signTexture(code, o), transparent: true, alphaTest: 0.5, roughness: 0.5 }));
-  face.position.set(0, h - size / 2, 0.03); g.add(face);
+  face.position.set(0, h - size / 2, 0.054); g.add(face);
   const sil = drawSign(code, o); const sctx = sil.getContext('2d')!;
   sctx.globalCompositeOperation = 'source-in'; sctx.fillStyle = '#ffffff'; sctx.fillRect(0, 0, sil.width, sil.height); // giữ hình dáng, xoá hoa văn
   const back = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8d9295, metalness: 0.5, roughness: 0.6, alphaMap: new THREE.CanvasTexture(sil), alphaTest: 0.5 }));
-  back.position.set(0, h - size / 2, 0.02); back.rotation.y = Math.PI; g.add(back);
+  back.position.set(0, h - size / 2, 0.040); back.rotation.y = Math.PI; g.add(back);
   g.userData = { signCode: code, meaning: SIGN_INFO[code], ...o };
   return g;
 }

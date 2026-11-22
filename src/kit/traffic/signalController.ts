@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /**
  * Bộ điều khiển đèn tín hiệu kiểu Việt Nam.
@@ -6,7 +7,6 @@ import * as THREE from 'three';
  * - Có ĐỒNG HỒ ĐẾM NGƯỢC (rất phổ biến ở VN) cho cả xanh và đỏ.
  * - Chế độ "vàng nhấp nháy" (giờ thấp điểm / đèn hỏng): người lái phải giảm tốc, nhường đường theo quy tắc.
  * - Thời gian rút ngắn cho game (đèn đỏ ~10 s theo yêu cầu) — chỉnh trong SignalTiming.
- * QCVN 41:2024 quy định xanh tối thiểu 15 s ngoài đời; game cố ý ngắn hơn cho nhịp chơi.
  */
 export type Light = 'green' | 'yellow' | 'red' | 'flashing' | 'off';
 
@@ -25,10 +25,12 @@ export class SignalController {
   stage: 'green' | 'yellow' | 'allRed' = 'green';
   flashingMode = false;
   private groups: number;
+  private approachMap = new Map<string, Approach>();
 
   constructor(public approaches: Approach[], public timing: SignalTiming = GAME_TIMING, offset = 0) {
     this.groups = Math.max(...approaches.map(a => a.group)) + 1;
     this.time = offset;
+    for (const a of approaches) this.approachMap.set(a.id, a);
   }
 
   get cycle() { return this.groups * (this.timing.green + this.timing.yellow + this.timing.allRed); }
@@ -44,14 +46,14 @@ export class SignalController {
 
   lightFor(approachId: string): Light {
     if (this.flashingMode) return (this.time % 1) < 0.5 ? 'flashing' : 'off';
-    const a = this.approaches.find(x => x.id === approachId); if (!a) return 'off';
+    const a = this.approachMap.get(approachId); if (!a) return 'off';
     if (a.group !== this.phase) return 'red';
     return this.stage === 'green' ? 'green' : this.stage === 'yellow' ? 'yellow' : 'red';
   }
 
   /** Số giây còn lại hiển thị trên đồng hồ đếm ngược của hướng này. */
   countdownFor(approachId: string): number {
-    const a = this.approaches.find(x => x.id === approachId); if (!a || this.flashingMode) return 0;
+    const a = this.approachMap.get(approachId); if (!a || this.flashingMode) return 0;
     const T = this.timing; const per = T.green + T.yellow + T.allRed;
     const t = this.time % this.cycle;
     const startOfGroup = a.group * per;
@@ -61,67 +63,220 @@ export class SignalController {
       if (local < T.green + T.yellow) return Math.ceil(T.green + T.yellow - local);
       return 0;
     }
-    // còn bao lâu tới lượt xanh
     let wait = startOfGroup - t; if (wait < 0) wait += this.cycle;
     return Math.ceil(wait);
   }
 }
 
-/* ---------------------------------------------------------------- 3D ---- */
+/* ---------------------------------------------------------------- 3D (Ultra-Batched!) ---- */
 
-/** Hộp đèn 3 bóng dọc (kiểu VN) + đồng hồ đếm ngược 2 chữ số bên dưới. Mặt đèn hướng +Z. */
+interface ColoredBoxPart {
+  w: number;
+  h: number;
+  d: number;
+  color: number;
+  x?: number;
+  y?: number;
+  z?: number;
+  rz?: number;
+}
+
+const _tmpMat4 = new THREE.Matrix4();
+const _tmpQuat = new THREE.Quaternion();
+const _tmpEuler = new THREE.Euler();
+const _tmpPos = new THREE.Vector3();
+const _tmpScale = new THREE.Vector3(1, 1, 1);
+const _tmpCol = new THREE.Color();
+
+function bakeSignalParts(parts: ColoredBoxPart[]): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  for (const p of parts) {
+    const raw = new THREE.BoxGeometry(p.w, p.h, p.d);
+    const g = raw.toNonIndexed();
+    raw.dispose();
+    _tmpPos.set(p.x ?? 0, p.y ?? 0, p.z ?? 0);
+    _tmpEuler.set(0, 0, p.rz ?? 0);
+    _tmpQuat.setFromEuler(_tmpEuler);
+    _tmpMat4.compose(_tmpPos, _tmpQuat, _tmpScale);
+    g.applyMatrix4(_tmpMat4);
+    g.computeVertexNormals();
+    const count = g.attributes.position.count;
+    _tmpCol.setHex(p.color);
+    const cols = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      cols[i * 3] = _tmpCol.r;
+      cols[i * 3 + 1] = _tmpCol.g;
+      cols[i * 3 + 2] = _tmpCol.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    geos.push(g);
+  }
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  if (!merged) throw new Error('bakeSignalParts failed');
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+const _batchedStaticMat = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.62,
+  metalness: 0.28,
+  flatShading: true,
+});
+
+const _geoLens = new THREE.BoxGeometry(0.42, 0.42, 0.06);
+const _geoBoardFace = new THREE.PlaneGeometry(0.60, 0.48);
+
+function buildBakedHeadHousing(showCountdown: boolean): THREE.BufferGeometry {
+  const parts: ColoredBoxPart[] = [
+    // High-contrast white reflective backplate border (cleanly behind housing, zero Z-fighting!)
+    { w: 0.76, h: 1.88, d: 0.05, color: 0xe8edf2, z: -0.195 },
+    // Bold dark blocky housing
+    { w: 0.62, h: 1.72, d: 0.34, color: 0x16191e },
+  ];
+  for (const y of [0.54, 0, -0.54]) {
+    // Recessed bezel frame + 3-sided blocky sun hood (mái che nắng)
+    parts.push(
+      { w: 0.48, h: 0.48, d: 0.04, color: 0x0f1216, y, z: 0.16 },
+      { w: 0.50, h: 0.06, d: 0.30, color: 0x0f1216, y: y + 0.23, z: 0.28 },
+      { w: 0.05, h: 0.36, d: 0.24, color: 0x0f1216, x: -0.23, y: y + 0.06, z: 0.25 },
+      { w: 0.05, h: 0.36, d: 0.24, color: 0x0f1216, x: 0.23, y: y + 0.06, z: 0.25 },
+    );
+  }
+  if (showCountdown) {
+    parts.push({ w: 0.68, h: 0.56, d: 0.24, color: 0x16191e, x: 0.66, y: 0.36, z: 0.02 });
+  }
+  return bakeSignalParts(parts);
+}
+
+// Pre-baked once globally: turns 16 static head meshes into 1 single draw call!
+const _geoHeadWithCountdown = buildBakedHeadHousing(true);
+const _geoHeadSimple = buildBakedHeadHousing(false);
+const _poleGeoCache = new Map<number, THREE.BufferGeometry>();
+
+function getBakedPoleGeo(armLength: number): THREE.BufferGeometry {
+  const key = Math.round(armLength * 10);
+  const cached = _poleGeoCache.get(key);
+  if (cached) return cached;
+  const parts: ColoredBoxPart[] = [
+    // Concrete plinth base
+    { w: 0.48, h: 0.36, d: 0.48, color: 0x1e2228, y: 0.18 },
+    // Crisp square steel vertical pole
+    { w: 0.22, h: 6.2, d: 0.22, color: 0x6c747e, y: 3.2 },
+    // Horizontal cantilevered truss arm
+    { w: armLength, h: 0.18, d: 0.18, color: 0x6c747e, x: -armLength / 2, y: 5.95 },
+    // Diagonal support brace under arm
+    { w: 1.1, h: 0.1, d: 0.1, color: 0x6c747e, x: -0.55, y: 5.45, rz: Math.PI / 4 },
+    // Electrical control cabinet bolted to pole
+    { w: 0.32, h: 0.48, d: 0.26, color: 0xe2e8f0, x: 0.24, y: 1.55 },
+  ];
+  // Bold red-white painted warning stripes at lower pole (rất đặc trưng VN)
+  for (let i = 0; i < 4; i++) {
+    parts.push({
+      w: 0.25,
+      h: 0.28,
+      d: 0.25,
+      color: i % 2 === 0 ? 0xd41c2c : 0xf4f5f2,
+      y: 0.50 + i * 0.28,
+    });
+  }
+  const geo = bakeSignalParts(parts);
+  _poleGeoCache.set(key, geo);
+  return geo;
+}
+
+/**
+ * Hộp đèn 3 bóng dọc kiểu blocky Việt Nam — tối ưu gộp vỏ/mái che thành 1 draw call duy nhất,
+ * bóng đèn màu tươi sắc nét (toneMapped: false) nhìn rõ từ xa > 120 m!
+ */
 export class TrafficLightHead {
   group = new THREE.Group();
-  private lamps: Record<'red' | 'yellow' | 'green', THREE.MeshStandardMaterial>;
-  private digitsCanvas = document.createElement('canvas');
-  private digitsTex: THREE.CanvasTexture;
+  private lamps: Record<'red' | 'yellow' | 'green', THREE.MeshBasicMaterial>;
+  private digitsCanvas: HTMLCanvasElement | null = null;
+  private digitsTex: THREE.CanvasTexture | null = null;
   private lastShown = '';
+  private lastLight: Light | '' = '';
 
-  constructor() {
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.34, 1.0, 0.22), new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.7 }));
-    housing.castShadow = true; this.group.add(housing);
-    const mk = (y: number) => {
-      const m = new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x000000, roughness: 0.3 });
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 24), m); lens.position.set(0, y, 0.112); this.group.add(lens);
-      const visor = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.16, 16, 1, true, -Math.PI / 2, Math.PI), new THREE.MeshStandardMaterial({ color: 0x151515, side: THREE.DoubleSide }));
-      visor.rotation.x = Math.PI / 2; visor.position.set(0, y + 0.01, 0.19); this.group.add(visor);
+  constructor(private showCountdown = true) {
+    // Single batched mesh for backplate + housing + 3 bezels + 9 sun visors + countdown box!
+    const housing = new THREE.Mesh(showCountdown ? _geoHeadWithCountdown : _geoHeadSimple, _batchedStaticMat);
+    this.group.add(housing);
+
+    const mkLens = (y: number, offHex: number) => {
+      const m = new THREE.MeshBasicMaterial({ color: offHex, toneMapped: false });
+      const lens = new THREE.Mesh(_geoLens, m);
+      lens.position.set(0, y, 0.185);
+      this.group.add(lens);
       return m;
     };
-    this.lamps = { red: mk(0.31), yellow: mk(0), green: mk(-0.31) };
-    this.digitsCanvas.width = 128; this.digitsCanvas.height = 64;
-    this.digitsTex = new THREE.CanvasTexture(this.digitsCanvas); this.digitsTex.colorSpace = THREE.SRGBColorSpace;
-    const board = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.2, 0.12), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-    board.position.set(0, -0.62, 0); this.group.add(board);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.16), new THREE.MeshBasicMaterial({ map: this.digitsTex, toneMapped: false }));
-    face.position.set(0, -0.62, 0.061); this.group.add(face);
+
+    this.lamps = {
+      red: mkLens(0.54, 0x331111),
+      yellow: mkLens(0, 0x33290e),
+      green: mkLens(-0.54, 0x0e2d1a),
+    };
+
+    if (showCountdown) {
+      this.digitsCanvas = document.createElement('canvas');
+      this.digitsCanvas.width = 96;
+      this.digitsCanvas.height = 72;
+      this.digitsTex = new THREE.CanvasTexture(this.digitsCanvas);
+      this.digitsTex.colorSpace = THREE.SRGBColorSpace;
+      const face = new THREE.Mesh(_geoBoardFace, new THREE.MeshBasicMaterial({ map: this.digitsTex, toneMapped: false }));
+      face.position.set(0.66, 0.36, 0.155);
+      this.group.add(face);
+    }
   }
 
   set(light: Light, countdown: number) {
-    const on = { red: light === 'red', yellow: light === 'yellow' || light === 'flashing', green: light === 'green' };
-    const col = { red: 0xff2a1a, yellow: 0xffb300, green: 0x19e07a } as const;
-    (Object.keys(this.lamps) as (keyof typeof col)[]).forEach(k => {
-      const m = this.lamps[k]; m.color.setHex(on[k] ? col[k] : 0x2a2a2a); m.emissive.setHex(on[k] ? col[k] : 0x000000); m.emissiveIntensity = on[k] ? 2.2 : 0;
-    });
-    const txt = light === 'flashing' || light === 'off' || countdown <= 0 ? '' : String(Math.min(99, countdown)).padStart(2, '0');
-    const color = light === 'green' ? '#19e07a' : light === 'yellow' ? '#ffb300' : '#ff2a1a';
+    if (light !== this.lastLight) {
+      this.lastLight = light;
+      this.lamps.red.color.setHex(light === 'red' ? 0xff2222 : 0x2c1111);
+      this.lamps.yellow.color.setHex(light === 'yellow' || light === 'flashing' ? 0xffc400 : 0x2c240d);
+      this.lamps.green.color.setHex(light === 'green' ? 0x10e860 : 0x0d2817);
+    }
+
+    if (!this.showCountdown || !this.digitsCanvas || !this.digitsTex) return;
+
+    const txt = light === 'flashing' || light === 'off' || countdown <= 0 ? '--' : String(Math.min(99, countdown)).padStart(2, '0');
+    const color = light === 'green' ? '#18f068' : light === 'yellow' || light === 'flashing' ? '#ffc800' : '#ff2e2e';
     const key = txt + color;
     if (key !== this.lastShown) {
-      const ctx = this.digitsCanvas.getContext('2d')!; ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, 128, 64);
-      ctx.fillStyle = color; ctx.font = '700 54px "Courier New", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, 64, 35);
-      this.digitsTex.needsUpdate = true; this.lastShown = key;
+      const ctx = this.digitsCanvas.getContext('2d')!;
+      ctx.fillStyle = '#07090c';
+      ctx.fillRect(0, 0, 96, 72);
+      ctx.strokeStyle = '#38414d';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1.5, 1.5, 93, 69);
+      ctx.fillStyle = color;
+      ctx.font = '800 54px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(txt, 48, 39);
+      this.digitsTex.needsUpdate = true;
+      this.lastShown = key;
     }
   }
 }
 
-/** Cột đèn cần vươn (cột chữ L) đặt ở góc giao lộ: 1 đầu đèn trên cần + 1 đầu đèn thấp trên thân cột. */
-export function makeSignalPole(armLength = 3.5) {
-  const g = new THREE.Group(); g.name = 'signal-pole';
-  const metal = new THREE.MeshStandardMaterial({ color: 0x8e9396, metalness: 0.7, roughness: 0.4 });
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 6, 12), metal); pole.position.y = 3; pole.castShadow = true; g.add(pole);
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, armLength, 10), metal); arm.rotation.z = Math.PI / 2; arm.position.set(-armLength / 2, 5.6, 0); g.add(arm);
-  // sọc trắng đỏ chân cột (thường thấy ở VN)
-  for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.25, 12), new THREE.MeshStandardMaterial({ color: i % 2 ? 0xc8102e : 0xf0f0f0 })); b.position.y = 0.125 + i * 0.25; g.add(b); }
-  const high = new TrafficLightHead(); high.group.position.set(-armLength + 0.3, 5.0, 0.15); g.add(high.group);
-  const low = new TrafficLightHead(); low.group.position.set(0, 3.0, 0.2); g.add(low.group);
+/** Cột đèn cần vươn blocky tối ưu (gộp toàn bộ thân cột + cần vươn + sọc đỏ trắng thành 1 draw call!). */
+export function makeSignalPole(armLength = 4.2) {
+  const g = new THREE.Group();
+  g.name = 'signal-pole';
+
+  const poleMesh = new THREE.Mesh(getBakedPoleGeo(armLength), _batchedStaticMat);
+  g.add(poleMesh);
+
+  // Main overhead signal head (large, with countdown) + eye-level repeater head
+  const high = new TrafficLightHead(true);
+  high.group.position.set(-armLength + 0.55, 5.15, 0.2);
+  g.add(high.group);
+
+  const low = new TrafficLightHead(false);
+  low.group.scale.setScalar(0.76);
+  low.group.position.set(0, 3.1, 0.26);
+  g.add(low.group);
+
   return { group: g, heads: [high, low] };
 }
